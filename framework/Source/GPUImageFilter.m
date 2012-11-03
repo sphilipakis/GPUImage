@@ -892,7 +892,7 @@ void dataProviderUnlockCallback (void *info, const void *data, size_t size)
 
 - (void)cleanupOutputImage;
 {
-//    NSLog(@"Cleaning up output filter image: %@", self);
+    NSLog(@"Cleaning up output filter image: %@", self);
     [self destroyFilterFBO];
     [self deleteOutputTexture];
 }

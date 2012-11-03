@@ -2,6 +2,9 @@
 #import "GPUImageMovieWriter.h"
 #import "GPUImagePicture.h"
 #import <mach/mach.h>
+// FROM SPS -->
+#import <mach/mach_host.h>
+// <-- FROM SPS
 
 void runOnMainQueueWithoutDeadlocking(void (^block)(void))
 {
@@ -42,6 +45,24 @@ void runAsynchronouslyOnVideoProcessingQueue(void (^block)(void))
 		dispatch_async(videoProcessingQueue, block);
 	}
 }
+// FROM SPS -->
+natural_t  freeMemory(void) {
+    mach_port_t           host_port = mach_host_self();
+    mach_msg_type_number_t   host_size = sizeof(vm_statistics_data_t) / sizeof(integer_t);
+    vm_size_t               pagesize;
+    vm_statistics_data_t     vm_stat;
+    
+    host_page_size(host_port, &pagesize);
+    
+    if (host_statistics(host_port, HOST_VM_INFO, (host_info_t)&vm_stat, &host_size) != KERN_SUCCESS) NSLog(@"Failed to fetch vm statistics");
+    
+    //natural_t   mem_used = (vm_stat.active_count + vm_stat.inactive_count + vm_stat.wire_count) * pagesize;
+    natural_t   mem_free = vm_stat.free_count * pagesize;
+    //natural_t   mem_total = mem_used + mem_free;
+    
+    return mem_free;
+}
+// <-- FROM SPS
 
 void reportAvailableMemoryForGPUImage(NSString *tag) 
 {    
@@ -60,7 +81,10 @@ void reportAvailableMemoryForGPUImage(NSString *tag)
                                    
                                    &size);    
     if( kerr == KERN_SUCCESS ) {        
-        NSLog(@"%@ - Memory used: %u", tag, info.resident_size); //in bytes        
+        // FROM SPS -->
+        
+        NSLog(@"%@ - Memory used: %u kb | free: %u kb", tag, info.resident_size/1024, freeMemory()/1024); //in kbytes
+        // <-- FROM SPS
     } else {        
         NSLog(@"%@ - Error: %s", tag, mach_error_string(kerr));        
     }    

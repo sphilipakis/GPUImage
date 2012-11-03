@@ -7,6 +7,10 @@ void runSynchronouslyOnVideoProcessingQueue(void (^block)(void));
 void runAsynchronouslyOnVideoProcessingQueue(void (^block)(void));
 void reportAvailableMemoryForGPUImage(NSString *tag);
 
+// FROM SPS -->
+natural_t  freeMemory(void);
+// <-- FROM SPS
+
 @class GPUImageMovieWriter;
 
 /** GPUImage's base source object

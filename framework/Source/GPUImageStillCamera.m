@@ -48,6 +48,12 @@ void GPUImageCreateResizedSampleBuffer(CVPixelBufferRef cameraFrame, CGSize fina
 
 @implementation GPUImageStillCamera
 
+//Kentoy
+- (AVCaptureStillImageOutput*)getAVCaptureStillImageOutput
+{
+    return photoOutput;
+}
+
 #pragma mark -
 #pragma mark Initialization and teardown
 
@@ -105,6 +111,110 @@ void GPUImageCreateResizedSampleBuffer(CVPixelBufferRef cameraFrame, CGSize fina
     return;
 }
 
+// FROM SPS -->
+
+UIImage* imageFromSampleBuffer(CMSampleBufferRef nextBuffer) {
+    
+    CVImageBufferRef imageBuffer = CMSampleBufferGetImageBuffer(nextBuffer);
+    printf("total size:%zu\n",CMSampleBufferGetTotalSampleSize(nextBuffer));
+    // Lock the base address of the pixel buffer.
+    //CVPixelBufferLockBaseAddress(imageBuffer,0);
+    
+    // Get the number of bytes per row for the pixel buffer.
+    size_t bytesPerRow = CVPixelBufferGetBytesPerRow(imageBuffer);
+    // Get the pixel buffer width and height.
+    size_t width = CVPixelBufferGetWidth(imageBuffer);
+    size_t height = CVPixelBufferGetHeight(imageBuffer);
+    printf("b:%zd w:%zd h:%zd\n",bytesPerRow,width,height);
+    
+    // Create a device-dependent RGB color space.
+    static CGColorSpaceRef colorSpace = NULL;
+    if (colorSpace == NULL) {
+        colorSpace = CGColorSpaceCreateDeviceRGB();
+        if (colorSpace == NULL) {
+            // Handle the error appropriately.
+            return nil;
+        }
+    }
+    
+    // Get the base address of the pixel buffer.
+    void *baseAddress = CVPixelBufferGetBaseAddress(imageBuffer);
+    // Get the data size for contiguous planes of the pixel buffer.
+    size_t bufferSize = CVPixelBufferGetDataSize(imageBuffer);
+    
+    // Create a Quartz direct-access data provider that uses data we supply.
+    CGDataProviderRef dataProvider =
+    CGDataProviderCreateWithData(NULL, baseAddress, bufferSize, NULL);
+    // Create a bitmap image from data supplied by the data provider.
+    CGImageRef cgImage =
+    CGImageCreate(width, height, 8, 32, bytesPerRow,
+                  colorSpace, kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little,
+                  dataProvider, NULL, true, kCGRenderingIntentDefault);
+    CGDataProviderRelease(dataProvider);
+    
+    // Create and return an image object to represent the Quartz image.
+    UIImage *image = [UIImage imageWithCGImage:cgImage];
+    CGImageRelease(cgImage);
+    
+    CVPixelBufferUnlockBaseAddress(imageBuffer, 0);
+    
+    return image;
+}
+
+- (CGImageRef) imageFromSampleBuffer:(CMSampleBufferRef) sampleBuffer // Create a CGImageRef from sample buffer data
+{
+    CVImageBufferRef imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer);
+    CVPixelBufferLockBaseAddress(imageBuffer,0);        // Lock the image buffer
+    
+    uint8_t *baseAddress = (uint8_t *)CVPixelBufferGetBaseAddressOfPlane(imageBuffer, 0);   // Get information of the image
+    size_t bytesPerRow = CVPixelBufferGetBytesPerRow(imageBuffer);
+    size_t width = CVPixelBufferGetWidth(imageBuffer);
+    size_t height = CVPixelBufferGetHeight(imageBuffer);
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    
+    CGContextRef newContext = CGBitmapContextCreate(baseAddress, width, height, 8, bytesPerRow, colorSpace, kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
+    CGImageRef newImage = CGBitmapContextCreateImage(newContext);
+    CGContextRelease(newContext);
+    
+    CGColorSpaceRelease(colorSpace);
+    CVPixelBufferUnlockBaseAddress(imageBuffer,0);
+    /* CVBufferRelease(imageBuffer); */  // do not call this!
+    return newImage;
+}
+
+-(void)capturePhotoAsImageWithCompletionHandler:(void (^)(UIImage *, NSError *))block {
+    dispatch_semaphore_wait(frameRenderingSemaphore, DISPATCH_TIME_FOREVER);
+    reportAvailableMemoryForGPUImage(@"Before raw image capture");
+    [photoOutput captureStillImageAsynchronouslyFromConnection:[[photoOutput connections] objectAtIndex:0] completionHandler:^(CMSampleBufferRef imageSampleBuffer, NSError *error) {
+        
+        UIImage* rawImage = nil;
+        if (CMSampleBufferIsValid(imageSampleBuffer)){
+            reportAvailableMemoryForGPUImage(@"Before raw imageFromSampleBuffer capture");
+            CGImageRef cgImage = [self imageFromSampleBuffer:imageSampleBuffer];
+            reportAvailableMemoryForGPUImage(@"After raw imageFromSampleBuffer capture");
+            rawImage =     [UIImage imageWithCGImage: cgImage ];
+            CGImageRelease( cgImage );
+            
+            
+            //            NSData *imageData = [AVCaptureStillImageOutput jpegStillImageNSDataRepresentation:imageSampleBuffer];
+            //           rawImage = [[UIImage alloc] initWithData:imageData];
+            
+        }
+        //UIImage *rawImage = imageFromSampleBuffer(imageSampleBuffer);//[self imageFromSampleBuffer:sampleBuffer];
+        dispatch_semaphore_signal(frameRenderingSemaphore);
+        reportAvailableMemoryForGPUImage(@"after getting uiimage");
+        if (rawImage)
+            block(rawImage, error);
+        else {
+            block(nil,error);
+            NSLog(@"no sample buffer!!!");
+        }
+    }];
+    
+}
+// <-- FROM SPS
+
+
 - (void)capturePhotoAsImageProcessedUpToFilter:(GPUImageOutput<GPUImageInput> *)finalFilterInChain withCompletionHandler:(void (^)(UIImage *processedImage, NSError *error))block;
 {
     dispatch_semaphore_wait(frameRenderingSemaphore, DISPATCH_TIME_FOREVER);
@@ -146,7 +256,30 @@ void GPUImageCreateResizedSampleBuffer(CVPixelBufferRef cameraFrame, CGSize fina
             }
         }
 
-        UIImage *filteredPhoto = [finalFilterInChain imageFromCurrentlyProcessedOutput];
+        //--------------------------------------------------
+        //Kentoy
+        UIDeviceOrientation deviceOrientation = [[UIDevice currentDevice] orientation];
+        UIImageOrientation imageOrientation = UIImageOrientationUp;
+        switch (deviceOrientation) {
+            case UIDeviceOrientationLandscapeLeft:
+                imageOrientation = UIImageOrientationLeft;
+                break;
+            case UIDeviceOrientationLandscapeRight:
+                imageOrientation = UIImageOrientationRight;
+                break;
+            case UIDeviceOrientationPortrait:
+                imageOrientation = UIImageOrientationUp;
+                break;
+            case UIDeviceOrientationPortraitUpsideDown:
+                imageOrientation = UIImageOrientationDown;
+                break;
+            default:
+                break;
+        }
+        //--------------------------------------------------
+        
+        //        UIImage *filteredPhoto = [finalFilterInChain imageFromCurrentlyProcessedOutput];
+        UIImage *filteredPhoto = [finalFilterInChain imageFromCurrentlyProcessedOutputWithOrientation:imageOrientation];
         dispatch_semaphore_signal(frameRenderingSemaphore);
         
         block(filteredPhoto, error);        
